@@ -1,0 +1,59 @@
+name: Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/build-site.mjs # кладёт в site/version.json коммит этого запуска
+      - run: node scripts/wasm-smoke.mjs site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-live:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Квитанция выпуска (release-receipt с проверкой контрольной суммы)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsSL -o /tmp/release-receipt.mjs https://github.com/Oleg4311/release-receipt/releases/download/v0.1.0/release-receipt.mjs
+          echo "0fd21b9f9be37f4668ef0272027791e734da56a49b1d81054907aad1b3790892  /tmp/release-receipt.mjs" | sha256sum -c
+          node /tmp/release-receipt.mjs verify https://oleg4311.github.io/rate-limiter-lab/ \
+            --sha "${{ github.sha }}" --repo "${{ github.repository }}" --workflow CI \
+            --wait 300 --interval 10 --out receipt.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: receipt
+          path: receipt.json
