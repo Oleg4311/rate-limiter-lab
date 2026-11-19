@@ -25,5 +25,5 @@ if (!commit) {
     commit = undefined;
   }
 }
-if (commit) writeFileSync(join('site', 'version.json'), JSON.stringify({ commit, version: '0.1.0', builtAt: new Date().toISOString() }, null, 2) + '\n');
+if (commit) writeFileSync(join('site', 'version.json'), JSON.stringify({ commit, version: '0.1.1', builtAt: new Date().toISOString() }, null, 2) + '\n');
 console.log('site/ готов');
