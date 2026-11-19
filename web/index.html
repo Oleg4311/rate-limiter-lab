@@ -24,6 +24,7 @@ button:hover{border-color:var(--mut)}
 #about{color:var(--mut);margin:12px 0 0}
 #chart svg{width:100%;height:auto;display:block;border-radius:12px}
 #err{color:var(--bad);margin:8px 0 0}
+.scroll{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:.92rem}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
@@ -56,11 +57,14 @@ footer{color:var(--mut);font-size:.85rem}a{color:var(--acc)}
 </section>
 
 <section class="card" aria-label="Таблица">
-  <table id="table" data-testid="table"></table>
+  <div class="scroll" tabindex="0" role="region" aria-label="Таблица результатов">
+    <table id="table" data-testid="table"></table>
+  </div>
 </section>
 
 <section class="card" aria-label="Что выбрать">
   <h2>Что выбрать</h2>
+  <div class="scroll" tabindex="0" role="region" aria-label="Сравнение алгоритмов">
   <table>
     <tr><th>Алгоритм</th><th>Память на ключ</th><th>Особенность</th></tr>
     <tr><td>fixed-window</td><td>O(1)</td><td>просто, но на стыке окон пропускает до 2×лимит</td></tr>
@@ -69,6 +73,7 @@ footer{color:var(--mut);font-size:.85rem}a{color:var(--acc)}
     <tr><td>token-bucket</td><td>O(1)</td><td>разрешает пачку (burst), затем держит среднюю скорость</td></tr>
     <tr><td>gcra</td><td>O(1), одно целое число</td><td>то же поведение, что token-bucket, без чисел с плавающей точкой</td></tr>
   </table>
+  </div>
 </section>
 
 <footer><a href="https://github.com/Oleg4311/rate-limiter-lab">Исходный код, CLI и сервис</a> · Сделано с помощью Claude</footer>
