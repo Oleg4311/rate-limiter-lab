@@ -1,0 +1,7 @@
+site/
+dist/
+ratelab
+ratelab.exe
+k6-summary.json
+*.log
+.env
