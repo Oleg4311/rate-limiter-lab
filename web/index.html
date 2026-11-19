@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rate-limiter-lab — сравнение алгоритмов rate limiting</title>
+<meta name="description" content="Fixed window, sliding log, sliding counter, token bucket и GCRA на одном и том же трафике: наглядно видно, где алгоритмы пропускают лишнее. Работает в браузере (Go → WebAssembly).">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mut:#5b6573;--line:#dde1e7;--acc:#0b6bcb;--acc-ink:#fff;--bad:#b42318}
+@media(prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1d2127;--ink:#eef0f3;--mut:#a3adba;--line:#2c323b;--acc:#5aa9ff;--acc-ink:#0b1220;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+h1{margin:0 0 4px;font-size:1.7rem}h2{margin:0 0 10px;font-size:1.05rem}
+.sub{color:var(--mut);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+label{display:block;font-size:.85rem;color:var(--mut);margin:0 0 4px}
+input,select{width:100%;height:42px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-height:40px;cursor:pointer}
+button:hover{border-color:var(--mut)}
+#about{color:var(--mut);margin:12px 0 0}
+#chart svg{width:100%;height:auto;display:block;border-radius:12px}
+#err{color:var(--bad);margin:8px 0 0}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.over{color:var(--bad);font-weight:600}
+footer{color:var(--mut);font-size:.85rem}a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+<h1>rate-limiter-lab</h1>
+<p class="sub">Пять алгоритмов ограничения частоты на одном и том же трафике. Всё считается в вашем браузере (Go → WebAssembly), время виртуальное, результат воспроизводится.</p>
+
+<section class="card" aria-label="Параметры">
+  <div class="presets" id="presets"></div>
+  <div class="grid">
+    <div style="grid-column:span 2"><label for="pattern">Трафик</label><select id="pattern"></select></div>
+    <div><label for="limit">Лимит</label><input id="limit" type="number" min="1" max="10000" value="100"></div>
+    <div><label for="window">Окно, мс</label><input id="window" type="number" min="10" max="60000" step="10" value="1000"></div>
+    <div><label for="burst">Пачка (0 = лимит)</label><input id="burst" type="number" min="0" value="0"></div>
+    <div><label for="rate">Частота, запр./с</label><input id="rate" type="number" min="1" max="100000" value="200"></div>
+    <div><label for="duration">Длительность, мс</label><input id="duration" type="number" min="1000" max="600000" step="500" value="6000"></div>
+    <div><label for="seed">Seed</label><input id="seed" type="number" value="7"></div>
+  </div>
+  <p id="about"></p>
+  <p id="err" role="alert" hidden></p>
+</section>
+
+<section class="card" aria-label="График" aria-live="polite">
+  <div id="chart" data-testid="chart"><p class="sub">Загрузка WebAssembly…</p></div>
+</section>
+
+<section class="card" aria-label="Таблица">
+  <table id="table" data-testid="table"></table>
+</section>
+
+<section class="card" aria-label="Что выбрать">
+  <h2>Что выбрать</h2>
+  <table>
+    <tr><th>Алгоритм</th><th>Память на ключ</th><th>Особенность</th></tr>
+    <tr><td>fixed-window</td><td>O(1)</td><td>просто, но на стыке окон пропускает до 2×лимит</td></tr>
+    <tr><td>sliding-log</td><td>O(лимит)</td><td>точно, но дорого по памяти при больших лимитах</td></tr>
+    <tr><td>sliding-counter</td><td>O(1)</td><td>дёшево и почти точно, но при пачках в конце окна ошибается до 2×</td></tr>
+    <tr><td>token-bucket</td><td>O(1)</td><td>разрешает пачку (burst), затем держит среднюю скорость</td></tr>
+    <tr><td>gcra</td><td>O(1), одно целое число</td><td>то же поведение, что token-bucket, без чисел с плавающей точкой</td></tr>
+  </table>
+</section>
+
+<footer><a href="https://github.com/Oleg4311/rate-limiter-lab">Исходный код, CLI и сервис</a> · Сделано с помощью Claude</footer>
+</main>
+<script src="wasm_exec.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const PRESETS = [
+  {name: 'Изъян fixed-window', v: {pattern: 'boundary', limit: 100, windowMs: 1000, burst: 0, rate: 200, durationMs: 6000, seed: 7}},
+  {name: 'Пачки', v: {pattern: 'burst', limit: 100, windowMs: 1000, burst: 0, rate: 200, durationMs: 8000, seed: 7}},
+  {name: 'Случайный поток', v: {pattern: 'poisson', limit: 100, windowMs: 1000, burst: 0, rate: 150, durationMs: 10000, seed: 7}},
+  {name: 'Нарастающая нагрузка', v: {pattern: 'ramp', limit: 100, windowMs: 1000, burst: 0, rate: 200, durationMs: 10000, seed: 7}},
+];
+const FIELDS = {pattern: 'pattern', limit: 'limit', windowMs: 'window', burst: 'burst', rate: 'rate', durationMs: 'duration', seed: 'seed'};
+let about = {};
+let timer;
+
+function params() {
+  const p = {pattern: $('pattern').value};
+  for (const k of ['limit', 'windowMs', 'burst', 'rate', 'durationMs', 'seed']) p[k] = Number($(FIELDS[k]).value);
+  return p;
+}
+function apply(v) { for (const k in v) $(FIELDS[k]).value = v[k]; run(); }
+const fmt = (x, d = 2) => x.toFixed(d).replace('.', ',');
+
+function run() {
+  const out = JSON.parse(ratelabRun(JSON.stringify(params())));
+  $('about').textContent = about[$('pattern').value] || '';
+  if (out.error) { $('err').textContent = out.error; $('err').hidden = false; return; }
+  $('err').hidden = true;
+  $('chart').innerHTML = out.svg;
+  const limit = out.result.scenario.limit;
+  $('table').innerHTML = '<tr><th>Алгоритм</th><th class="n">Принято</th><th class="n">Отклонено</th><th class="n">Максимум в окне</th><th class="n">К лимиту</th></tr>' +
+    out.result.algorithms.map(a => {
+      const r = a.maxInWindow / limit;
+      return `<tr data-algo="${a.name}"><td>${a.name}</td><td class="n">${a.allowed}</td><td class="n">${a.denied}</td><td class="n">${a.maxInWindow}</td><td class="n ${r > 1.0001 ? 'over' : ''}">×${fmt(r)}</td></tr>`;
+    }).join('');
+}
+function schedule() { clearTimeout(timer); timer = setTimeout(run, 120); }
+
+(async () => {
+  try {
+    const go = new Go();
+    let res;
+    try { res = await WebAssembly.instantiateStreaming(fetch('ratelab.wasm'), go.importObject); }
+    catch { res = await WebAssembly.instantiate(await (await fetch('ratelab.wasm')).arrayBuffer(), go.importObject); }
+    go.run(res.instance);
+    const patterns = JSON.parse(ratelabPatterns());
+    $('pattern').innerHTML = patterns.map(p => { about[p.id] = p.about; return `<option value="${p.id}">${p.title}</option>`; }).join('');
+    $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-preset="${i}">${p.name}</button>`).join('');
+    $('presets').addEventListener('click', e => { const b = e.target.closest('button'); if (b) apply(PRESETS[b.dataset.preset].v); });
+    for (const id of Object.values(FIELDS)) $(id).addEventListener('input', schedule);
+    apply(PRESETS[0].v);
+  } catch (err) {
+    $('chart').textContent = 'Не удалось загрузить WebAssembly: ' + err;
+  }
+})();
+</script>
+</body>
+</html>
